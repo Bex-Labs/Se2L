@@ -56,6 +56,11 @@ type NewcomerProfileRow = {
     dependant_count: number
 }
 
+type UserTaskStateRow = {
+    task_id: string
+    status: string
+}
+
 function getFrontendVisaType(visaType: string) {
     const visaTypeMap: Record<string, string> = {
         'Skilled Worker': 'skilled-worker',
@@ -355,6 +360,44 @@ function DashboardPage() {
     }, [authLoading, user])
 
     useEffect(() => {
+        let isMounted = true
+
+        async function loadBackendCompletedTaskIds() {
+            if (authLoading || !user) {
+                return
+            }
+
+            const { data, error } = await supabase
+                .from('user_task_states')
+                .select('task_id, status')
+                .eq('user_id', user.id)
+                .eq('status', 'complete')
+
+            if (!isMounted) {
+                return
+            }
+
+            if (error) {
+                console.error('Failed to load task progress:', error.message)
+                return
+            }
+
+            const backendCompletedTaskIds = ((data ?? []) as UserTaskStateRow[]).map(
+                (taskState) => taskState.task_id,
+            )
+
+            setCompletedTaskIds(backendCompletedTaskIds)
+            saveCompletedTaskIds(backendCompletedTaskIds)
+        }
+
+        loadBackendCompletedTaskIds()
+
+        return () => {
+            isMounted = false
+        }
+    }, [authLoading, user])
+
+    useEffect(() => {
         saveCompletedTaskIds(completedTaskIds)
     }, [completedTaskIds])
 
@@ -511,14 +554,41 @@ function DashboardPage() {
         navigate('/onboarding')
     }
 
-    function handleTaskToggle(taskId: string) {
-        setCompletedTaskIds((currentTaskIds) => {
-            if (currentTaskIds.includes(taskId)) {
-                return currentTaskIds.filter((currentTaskId) => currentTaskId !== taskId)
-            }
+    async function handleTaskToggle(taskId: string) {
+        const taskIsCurrentlyComplete = completedTaskIds.includes(taskId)
 
-            return [...currentTaskIds, taskId]
-        })
+        const updatedCompletedTaskIds = taskIsCurrentlyComplete
+            ? completedTaskIds.filter((currentTaskId) => currentTaskId !== taskId)
+            : [...completedTaskIds, taskId]
+
+        setCompletedTaskIds(updatedCompletedTaskIds)
+        saveCompletedTaskIds(updatedCompletedTaskIds)
+
+        if (!user) {
+            return
+        }
+
+        const now = new Date().toISOString()
+
+        const { error } = await supabase.from('user_task_states').upsert(
+            {
+                user_id: user.id,
+                task_id: taskId,
+                status: taskIsCurrentlyComplete ? 'pending' : 'complete',
+                completed_at: taskIsCurrentlyComplete ? null : now,
+                updated_at: now,
+            },
+            {
+                onConflict: 'user_id,task_id',
+            },
+        )
+
+        if (error) {
+            console.error('Failed to save task progress:', error.message)
+
+            setCompletedTaskIds(completedTaskIds)
+            saveCompletedTaskIds(completedTaskIds)
+        }
     }
 
     function renderDashboardTaskCard(task: (typeof dashboardTasks)[number]) {
