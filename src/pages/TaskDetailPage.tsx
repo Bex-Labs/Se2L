@@ -2,12 +2,56 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
-import { dashboardTasks } from '../data/settlementTasks'
+import {
+  dashboardTasks,
+  type SettlementTask,
+  type TaskRegion,
+} from '../data/settlementTasks'
 import {
   isTaskComplete,
   saveCompletedTaskIds,
   toggleSavedTaskCompletion,
 } from '../utils/taskProgressStorage'
+
+type SettlementTaskRow = {
+  id: string
+  label: string
+  label_colour_class: string
+  title: string
+  description: string
+  phase_id: string
+  language: string
+  category: string
+  urgency: string
+  estimated_time: string
+  why_it_matters: string
+  steps: string[]
+  official_links: SettlementTask['officialLinks']
+  youtube_video_url: string | null
+  uk_regions: TaskRegion[]
+  visa_types: string[]
+}
+
+function mapSettlementTaskRowToTask(row: SettlementTaskRow): SettlementTask {
+  return {
+    id: row.id,
+    label: row.label,
+    labelColourClass: row.label_colour_class,
+    title: row.title,
+    description: row.description,
+    phaseId: row.phase_id,
+    language: row.language as SettlementTask['language'],
+    category: row.category as SettlementTask['category'],
+    urgency: row.urgency as SettlementTask['urgency'],
+    estimatedTime: row.estimated_time,
+    whyItMatters: row.why_it_matters,
+    steps: row.steps,
+    officialLinks: row.official_links ?? [],
+    youtubeVideoUrl: row.youtube_video_url ?? undefined,
+    ukRegions: row.uk_regions,
+    visaTypes: row.visa_types,
+  }
+}
 
 function formatUrgencyLabel(urgency: string) {
   if (urgency === 'critical') {
@@ -37,13 +81,75 @@ function TaskDetailPage() {
   const { taskId } = useParams()
   const { user, loading: authLoading } = useAuth()
 
-  const task = dashboardTasks.find(
+  const fallbackTask = dashboardTasks.find(
     (currentTask) => currentTask.id === taskId,
   )
+
+  const [backendTask, setBackendTask] = useState<SettlementTask | null>(null)
+  const [isLoadingTask, setIsLoadingTask] = useState(true)
+  const [taskLoadError, setTaskLoadError] = useState<string | null>(null)
+
+  const task = backendTask ?? fallbackTask
 
   const [isComplete, setIsComplete] = useState(false)
   const [isSavingProgress, setIsSavingProgress] = useState(false)
   const [progressSaveError, setProgressSaveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadTaskDetail() {
+      if (!taskId) {
+        setIsLoadingTask(false)
+        return
+      }
+
+      if (authLoading) {
+        return
+      }
+
+      if (!user) {
+        setBackendTask(null)
+        setIsLoadingTask(false)
+        return
+      }
+
+      setIsLoadingTask(true)
+      setTaskLoadError(null)
+
+      const { data, error } = await supabase
+        .from('settlement_tasks')
+        .select(
+          'id, label, label_colour_class, title, description, phase_id, language, category, urgency, estimated_time, why_it_matters, steps, official_links, youtube_video_url, uk_regions, visa_types',
+        )
+        .eq('id', taskId)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        console.error('Failed to load task detail:', error.message)
+        setTaskLoadError(
+          'We could not load the latest task guidance. Showing saved guidance instead.',
+        )
+        setBackendTask(null)
+        setIsLoadingTask(false)
+        return
+      }
+
+      setBackendTask(data ? mapSettlementTaskRowToTask(data as SettlementTaskRow) : null)
+      setIsLoadingTask(false)
+    }
+
+    loadTaskDetail()
+
+    return () => {
+      isMounted = false
+    }
+  }, [authLoading, taskId, user])
 
   useEffect(() => {
     let isMounted = true
@@ -139,6 +245,26 @@ function TaskDetailPage() {
     }
   }
 
+  if (authLoading || isLoadingTask) {
+    return (
+      <section className="mx-auto flex min-h-[70vh] max-w-3xl items-center px-6 py-12">
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl">
+          <p className="mb-3 inline-flex rounded-full bg-indigo-100 px-4 py-2 text-sm font-semibold text-indigo-700">
+            Loading task
+          </p>
+
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-950 md:text-5xl">
+            Preparing task guidance.
+          </h1>
+
+          <p className="mt-4 text-lg leading-8 text-slate-600">
+            Please wait while we load the latest settlement task details.
+          </p>
+        </div>
+      </section>
+    )
+  }
+
   if (!task) {
     return (
       <section className="mx-auto max-w-3xl px-6 py-12">
@@ -218,6 +344,12 @@ function TaskDetailPage() {
                 : 'Mark as complete'}
           </button>
         </div>
+
+        {taskLoadError && (
+          <p className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+            {taskLoadError}
+          </p>
+        )}
 
         {progressSaveError && (
           <p className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">

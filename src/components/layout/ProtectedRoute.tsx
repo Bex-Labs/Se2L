@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 
 // 1. Tell TypeScript about the new props from the contributor's code
 type ProtectedRouteProps = {
@@ -8,10 +8,10 @@ type ProtectedRouteProps = {
 };
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { session, isLoading } = useAuth();
+  const { session, loading } = useAuth();
 
   // Show a loading spinner while Supabase checks local storage
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
