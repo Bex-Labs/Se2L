@@ -1,6 +1,6 @@
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import HeroSection from '../components/landing/HeroSection';
-import { useAuth } from '../contexts/AuthContext'; // 1. Import the hook
+import { useAuth } from '../context/AuthContext'; // removed the 's' // 1. Import the hook
 
 function LandingPage() {
   // 2. Call the hook INSIDE the component

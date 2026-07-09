@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../utils/supabase';
 import { useTranslation } from 'react-i18next';
 
