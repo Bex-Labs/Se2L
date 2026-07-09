@@ -22,19 +22,21 @@ function HeroSection() {
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          {/* Changed this from /onboarding to /auth */}
           <Link
-            to="/onboarding"
-            className="rounded-xl bg-indigo-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+            to="/auth"
+            className="rounded-xl bg-indigo-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 transition-colors"
           >
-            Start onboarding
+            Start your journey
           </Link>
 
-          <Link
-            to="/"
-            className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-center text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          {/* Changed this to act as an anchor link for a future features section */}
+          <a
+            href="#features"
+            className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-center text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
           >
             View how it works
-          </Link>
+          </a>
         </div>
       </div>
 
