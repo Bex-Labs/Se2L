@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabaseClient'
 import { dashboardTasks } from '../data/settlementTasks'
 import {
   isTaskComplete,
+  saveCompletedTaskIds,
   toggleSavedTaskCompletion,
 } from '../utils/taskProgressStorage'
 
@@ -32,29 +35,108 @@ function getTaskUrgencyClass(urgency: string) {
 
 function TaskDetailPage() {
   const { taskId } = useParams()
+  const { user, loading: authLoading } = useAuth()
 
   const task = dashboardTasks.find(
     (currentTask) => currentTask.id === taskId,
   )
 
   const [isComplete, setIsComplete] = useState(false)
+  const [isSavingProgress, setIsSavingProgress] = useState(false)
+  const [progressSaveError, setProgressSaveError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!taskId) {
+    let isMounted = true
+
+    async function loadTaskCompletionState() {
+      if (!taskId) {
+        return
+      }
+
+      setIsComplete(isTaskComplete(taskId))
+
+      if (authLoading || !user) {
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('user_task_states')
+        .select('task_id, status')
+        .eq('user_id', user.id)
+        .eq('task_id', taskId)
+        .maybeSingle()
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        console.error('Failed to load task completion state:', error.message)
+        return
+      }
+
+      setIsComplete(data?.status === 'complete')
+    }
+
+    loadTaskCompletionState()
+
+    return () => {
+      isMounted = false
+    }
+  }, [authLoading, taskId, user])
+
+  async function handleTaskCompletionToggle() {
+    if (!taskId || isSavingProgress) {
       return
     }
 
-    setIsComplete(isTaskComplete(taskId))
-  }, [taskId])
+    const taskIsCurrentlyComplete = isComplete
+    const nextIsComplete = !taskIsCurrentlyComplete
 
-  function handleTaskCompletionToggle() {
-    if (!taskId) {
-      return
-    }
+    setIsComplete(nextIsComplete)
+    setProgressSaveError(null)
 
     const updatedCompletedTaskIds = toggleSavedTaskCompletion(taskId)
 
-    setIsComplete(updatedCompletedTaskIds.includes(taskId))
+    if (!user) {
+      return
+    }
+
+    setIsSavingProgress(true)
+
+    const now = new Date().toISOString()
+
+    const { error } = await supabase.from('user_task_states').upsert(
+      {
+        user_id: user.id,
+        task_id: taskId,
+        status: nextIsComplete ? 'complete' : 'pending',
+        completed_at: nextIsComplete ? now : null,
+        updated_at: now,
+      },
+      {
+        onConflict: 'user_id,task_id',
+      },
+    )
+
+    setIsSavingProgress(false)
+
+    if (error) {
+      console.error('Failed to save task progress:', error.message)
+
+      setIsComplete(taskIsCurrentlyComplete)
+      saveCompletedTaskIds(
+        taskIsCurrentlyComplete
+          ? [...updatedCompletedTaskIds, taskId]
+          : updatedCompletedTaskIds.filter(
+              (completedTaskId) => completedTaskId !== taskId,
+            ),
+      )
+
+      setProgressSaveError(
+        'We could not save your task progress. Please try again.',
+      )
+    }
   }
 
   if (!task) {
@@ -122,14 +204,26 @@ function TaskDetailPage() {
           <button
             type="button"
             onClick={handleTaskCompletionToggle}
-            className={`w-fit rounded-xl px-5 py-3 text-sm font-semibold shadow-sm ${isComplete
-              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-              : 'bg-indigo-600 text-white hover:bg-indigo-700'
-              }`}
+            disabled={isSavingProgress}
+            className={`w-fit rounded-xl px-5 py-3 text-sm font-semibold shadow-sm disabled:cursor-not-allowed disabled:opacity-70 ${
+              isComplete
+                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+            }`}
           >
-            {isComplete ? 'Completed ✓' : 'Mark as complete'}
+            {isSavingProgress
+              ? 'Saving...'
+              : isComplete
+                ? 'Completed ✓'
+                : 'Mark as complete'}
           </button>
         </div>
+
+        {progressSaveError && (
+          <p className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {progressSaveError}
+          </p>
+        )}
 
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -207,6 +301,7 @@ function TaskDetailPage() {
             </div>
           </section>
         ) : null}
+
         {task.youtubeVideoUrl ? (
           <section className="mt-8 rounded-3xl border border-slate-200 bg-slate-50 p-6">
             <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600">

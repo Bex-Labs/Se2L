@@ -3,7 +3,11 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import DashboardTaskCard from '../components/dashboard/DashboardTaskCard'
-import { dashboardTasks, type TaskRegion } from '../data/settlementTasks'
+import {
+    dashboardTasks,
+    type SettlementTask,
+    type TaskRegion,
+} from '../data/settlementTasks'
 import JourneyPhaseTimeline from '../components/dashboard/JourneyPhaseTimeline'
 import {
     getSavedCompletedTaskIds,
@@ -61,6 +65,25 @@ type UserTaskStateRow = {
     status: string
 }
 
+type SettlementTaskRow = {
+    id: string
+    label: string
+    label_colour_class: string
+    title: string
+    description: string
+    phase_id: string
+    language: string
+    category: string
+    urgency: string
+    estimated_time: string
+    why_it_matters: string
+    steps: string[]
+    official_links: SettlementTask['officialLinks']
+    youtube_video_url: string | null
+    uk_regions: TaskRegion[]
+    visa_types: string[]
+}
+
 function getFrontendVisaType(visaType: string) {
     const visaTypeMap: Record<string, string> = {
         'Skilled Worker': 'skilled-worker',
@@ -115,6 +138,27 @@ function mapProfileToJourneyDetails(profile: NewcomerProfileRow): JourneyDetails
         region: getFrontendRegion(profile.uk_region),
         language: getFrontendLanguage(profile.selected_language),
         dependants: getFrontendDependants(profile.dependant_count),
+    }
+}
+
+function mapSettlementTaskRowToTask(row: SettlementTaskRow): SettlementTask {
+    return {
+        id: row.id,
+        label: row.label,
+        labelColourClass: row.label_colour_class,
+        title: row.title,
+        description: row.description,
+        phaseId: row.phase_id,
+        language: row.language as SettlementTask['language'],
+        category: row.category as SettlementTask['category'],
+        urgency: row.urgency as SettlementTask['urgency'],
+        estimatedTime: row.estimated_time,
+        whyItMatters: row.why_it_matters,
+        steps: row.steps,
+        officialLinks: row.official_links ?? [],
+        youtubeVideoUrl: row.youtube_video_url ?? undefined,
+        ukRegions: row.uk_regions,
+        visaTypes: row.visa_types,
     }
 }
 
@@ -300,6 +344,12 @@ function DashboardPage() {
         getSavedCompletedTaskIds,
     )
 
+    const [backendDashboardTasks, setBackendDashboardTasks] =
+        useState<SettlementTask[]>(dashboardTasks)
+
+    const [isLoadingTasks, setIsLoadingTasks] = useState(true)
+    const [taskLoadError, setTaskLoadError] = useState<string | null>(null)
+
     useEffect(() => {
         let isMounted = true
 
@@ -362,6 +412,62 @@ function DashboardPage() {
     useEffect(() => {
         let isMounted = true
 
+        async function loadBackendDashboardTasks() {
+            if (authLoading) {
+                return
+            }
+
+            if (!user) {
+                setBackendDashboardTasks(dashboardTasks)
+                setIsLoadingTasks(false)
+                return
+            }
+
+            setIsLoadingTasks(true)
+            setTaskLoadError(null)
+
+            const { data, error } = await supabase
+                .from('settlement_tasks')
+                .select(
+                    'id, label, label_colour_class, title, description, phase_id, language, category, urgency, estimated_time, why_it_matters, steps, official_links, youtube_video_url, uk_regions, visa_types',
+                )
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true })
+
+            if (!isMounted) {
+                return
+            }
+
+            if (error) {
+                console.error('Failed to load settlement tasks:', error.message)
+                setTaskLoadError(
+                    'We could not load the latest settlement tasks. Showing saved task guidance instead.',
+                )
+                setBackendDashboardTasks(dashboardTasks)
+                setIsLoadingTasks(false)
+                return
+            }
+
+            const mappedTasks = ((data ?? []) as SettlementTaskRow[]).map(
+                mapSettlementTaskRowToTask,
+            )
+
+            setBackendDashboardTasks(
+                mappedTasks.length > 0 ? mappedTasks : dashboardTasks,
+            )
+            setIsLoadingTasks(false)
+        }
+
+        loadBackendDashboardTasks()
+
+        return () => {
+            isMounted = false
+        }
+    }, [authLoading, user])
+
+    useEffect(() => {
+        let isMounted = true
+
         async function loadBackendCompletedTaskIds() {
             if (authLoading || !user) {
                 return
@@ -401,7 +507,7 @@ function DashboardPage() {
         saveCompletedTaskIds(completedTaskIds)
     }, [completedTaskIds])
 
-    if (authLoading || isLoadingJourney) {
+    if (authLoading || isLoadingJourney || isLoadingTasks) {
         return (
             <section className="mx-auto flex min-h-[70vh] max-w-3xl items-center px-6 py-12">
                 <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl">
@@ -414,7 +520,8 @@ function DashboardPage() {
                     </h1>
 
                     <p className="mt-4 text-lg leading-8 text-slate-600">
-                        Please wait while we load your saved settlement journey.
+                        Please wait while we load your saved settlement journey and task
+                        guidance.
                     </p>
                 </div>
             </section>
@@ -482,7 +589,7 @@ function DashboardPage() {
     const arrivalDate = formatArrivalDate(journeyDetails?.arrivalDate)
     const currentPhase = calculateCurrentPhase(journeyDetails.arrivalDate)
 
-    const filteredDashboardTasks = dashboardTasks.filter(
+    const filteredDashboardTasks = backendDashboardTasks.filter(
         (task) =>
             task.visaTypes.includes(journeyDetails.visaType) &&
             isTaskAvailableInRegion(task.ukRegions, journeyDetails.region),
@@ -543,9 +650,10 @@ function DashboardPage() {
         filteredDashboardTaskIds.includes(taskId),
     ).length
     const totalTaskCount = filteredDashboardTasks.length
-    const progressPercentage = Math.round(
-        (completedTaskCount / totalTaskCount) * 100,
-    )
+    const progressPercentage =
+        totalTaskCount > 0
+            ? Math.round((completedTaskCount / totalTaskCount) * 100)
+            : 0
 
     function handleStartNewJourney() {
         clearSavedJourneyDetails()
@@ -591,7 +699,7 @@ function DashboardPage() {
         }
     }
 
-    function renderDashboardTaskCard(task: (typeof dashboardTasks)[number]) {
+    function renderDashboardTaskCard(task: SettlementTask) {
         return (
             <DashboardTaskCard
                 key={task.id}
@@ -638,6 +746,11 @@ function DashboardPage() {
                         Start new journey
                     </button>
 
+                    {taskLoadError && (
+                        <p className="mt-4 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                            {taskLoadError}
+                        </p>
+                    )}
                 </div>
 
                 <JourneyPhaseTimeline currentPhaseId={currentPhase.id} />
@@ -675,7 +788,9 @@ function DashboardPage() {
                                         Due now
                                     </h3>
 
-                                    <div className="space-y-4">{dueNowTasks.map(renderDashboardTaskCard)}</div>
+                                    <div className="space-y-4">
+                                        {dueNowTasks.map(renderDashboardTaskCard)}
+                                    </div>
                                 </section>
                             ) : null}
 
@@ -713,6 +828,18 @@ function DashboardPage() {
                                         {completedDashboardTasks.map(renderDashboardTaskCard)}
                                     </div>
                                 </section>
+                            ) : null}
+
+                            {sortedDashboardTasks.length === 0 ? (
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                    <h3 className="font-bold text-slate-950">
+                                        No tasks available yet
+                                    </h3>
+
+                                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                                        We could not find active tasks for this journey setup.
+                                    </p>
+                                </div>
                             ) : null}
                         </div>
                     </article>
@@ -754,7 +881,9 @@ function DashboardPage() {
                         </article>
 
                         <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                            <h2 className="text-lg font-bold text-slate-950">For your family</h2>
+                            <h2 className="text-lg font-bold text-slate-950">
+                                For your family
+                            </h2>
 
                             {familyTasks.length > 0 ? (
                                 <div className="mt-4 space-y-4">
@@ -763,7 +892,9 @@ function DashboardPage() {
                                             key={task.id}
                                             className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                         >
-                                            <h3 className="font-bold text-slate-950">{task.title}</h3>
+                                            <h3 className="font-bold text-slate-950">
+                                                {task.title}
+                                            </h3>
 
                                             <p className="mt-1 text-sm leading-6 text-slate-600">
                                                 {task.description}
@@ -773,7 +904,8 @@ function DashboardPage() {
                                 </div>
                             ) : (
                                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                                    No family tasks are needed based on your current dependant selection.
+                                    No family tasks are needed based on your current dependant
+                                    selection.
                                 </p>
                             )}
                         </article>
