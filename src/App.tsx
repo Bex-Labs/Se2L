@@ -1,7 +1,7 @@
 // src/App.tsx
 
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { useAuth } from './context/AuthContext'
+import { useAuth } from './context/AuthContext'; // removed the 's'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
 import AppManagerPage from './pages/AppManagerPage'
